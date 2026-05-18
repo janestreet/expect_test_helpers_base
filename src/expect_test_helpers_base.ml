@@ -166,13 +166,13 @@ let rec replace_s (sexp : Sexp.t) ~pattern ~with_ : Sexp.t =
   | List list -> List (List.map list ~f:(replace_s ~pattern ~with_))
 ;;
 
-let expect_test_output ?(here = Stdlib.Lexing.dummy_pos) () =
+let expect_test_output ~(here : [%call_pos]) () =
   (Ppx_expect_runtime.For_external.read_current_test_output_exn
   [@alert "-ppx_expect_runtime"])
     ~here
 ;;
 
-let with_empty_expect_test_output ?(here = Stdlib.Lexing.dummy_pos) f =
+let with_empty_expect_test_output ~(here : [%call_pos]) f =
   let frame =
     (Ppx_expect_runtime.For_external.push_output_exn [@alert "-ppx_expect_runtime"]) ~here
   in
@@ -190,7 +190,7 @@ let with_empty_expect_test_output ?(here = Stdlib.Lexing.dummy_pos) f =
             "check uses of [with_empty_expect_test_output_async]"])
 ;;
 
-let raise_if_output_did_not_match ?message ?(here = Stdlib.Lexing.dummy_pos) () =
+let raise_if_output_did_not_match ?message ~(here : [%call_pos]) () =
   if (Ppx_expect_runtime.For_external.current_test_has_output_that_does_not_match_exn
      [@alert "-ppx_expect_runtime"])
        ~here
@@ -207,12 +207,12 @@ let am_running_expect_test =
   (Ppx_expect_runtime.For_external.am_running_expect_test [@alert "-ppx_expect_runtime"])
 ;;
 
-let current_expect_test_name_exn ?(here = Stdlib.Lexing.dummy_pos) () =
+let current_expect_test_name_exn ~(here : [%call_pos]) () =
   Ppx_expect_runtime.For_external.current_expect_test_name_exn
     ~here [@alert "-ppx_expect_runtime"]
 ;;
 
-let assert_am_running_expect_test ?(here = Stdlib.Lexing.dummy_pos) () =
+let assert_am_running_expect_test ~(here : [%call_pos]) () =
   if am_running_expect_test ()
   then ()
   else
@@ -257,7 +257,7 @@ let remove_backtraces =
 module Expectation = struct
   include Ppx_expect_runtime.For_external.Expectation [@alert "-ppx_expect_runtime"]
 
-  let reset ?(here = Stdlib.Lexing.dummy_pos) () =
+  let reset ~(here : [%call_pos]) () =
     let output_since_expectation = expect_test_output ~here () in
     let output_at_expectation = actual ~here () in
     print_string output_at_expectation;
@@ -280,7 +280,7 @@ let print_cr_with_optional_message
   ?(hide_positions = CR.hide_unstable_output cr)
   ?hide_paths
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   optional_message
   =
   assert_am_running_expect_test ~here ();
@@ -299,14 +299,7 @@ let print_cr_with_optional_message
            ])
 ;;
 
-let print_cr
-  ?cr
-  ?hide_positions
-  ?hide_paths
-  ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
-  message
-  =
+let print_cr ?cr ?hide_positions ?hide_paths ?sexp_style ~(here : [%call_pos]) message =
   print_cr_with_optional_message
     ?cr
     ?hide_positions
@@ -319,9 +312,9 @@ let print_cr
 let require_internal
   ?cr
   ?hide_positions
-  ~if_false_then_print_s
+  ~(local_ if_false_then_print_s)
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   bool
   =
   match bool with
@@ -335,7 +328,7 @@ let print_cr_if_false
   ?cr
   ?hide_positions
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   bool
   if_false_then_print_s
   =
@@ -354,10 +347,12 @@ let require
   ?hide_positions
   ?if_false_then_print_s
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   bool
   =
-  let if_false_then_print_s () = Option.map if_false_then_print_s ~f:force in
+  let if_false_then_print_s =
+    stack_ fun () -> Option.map if_false_then_print_s ~f:force
+  in
   require_internal
     ?cr
     ?hide_positions
@@ -372,24 +367,26 @@ let require
 [@@@mode.default m = (local, global)]
 
 let require_equal
-  (type a)
+  (type a : k)
   ?cr
   ?hide_positions
   ?if_false_then_print_s
   ?(message = "values are not equal")
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   (module M : With_equal with type t = a[@mode m])
   x
   y
   =
-  let if_false_then_print_s () =
-    Some
-      [%message
-        message
-          ~_:(x : M.t)
-          ~_:(y : M.t)
-          ~_:(if_false_then_print_s : (Sexp.t Base.Lazy.t option[@sexp.option]))]
+  let if_false_then_print_s =
+    stack_
+      fun () ->
+        Some
+          [%message
+            message
+              ~_:(x : M.t)
+              ~_:(y : M.t)
+              ~_:(if_false_then_print_s : (Sexp.t Base.Lazy.t option[@sexp.option]))]
   in
   require_internal
     ?cr
@@ -401,13 +398,13 @@ let require_equal
 ;;
 
 let require_not_equal
-  (type a)
+  (type a : k)
   ?cr
   ?hide_positions
   ?if_false_then_print_s
   ?(message = "values are equal")
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   (module M : With_equal with type t = a[@mode m])
   x
   y
@@ -428,12 +425,12 @@ let require_not_equal
 ;;
 
 let require_compare_equal
-  (type a)
+  (type a : k)
   ?cr
   ?hide_positions
   ?message
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   (module M : With_compare with type t = a[@mode m])
   x
   y
@@ -454,12 +451,12 @@ let require_compare_equal
 ;;
 
 let require_compare_not_equal
-  (type a)
+  (type a : k)
   ?cr
   ?hide_positions
   ?message
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   (module M : With_compare with type t = a[@mode m])
   x
   y
@@ -485,7 +482,7 @@ let require_sets_are_equal
   ?hide_positions
   ?(names = "first", "second")
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   first
   second
   =
@@ -527,8 +524,8 @@ let try_with
   ?raise_message
   ?(show_backtrace = false)
   ?(sanitize = Fn.id)
-  (type a)
-  (f : unit -> a)
+  (type a : value_or_null)
+  (f : unit -> a @ local once)
   =
   Backtrace.Exn.with_recording show_backtrace ~f:(fun () ->
     match ignore (f () : a) with
@@ -555,7 +552,7 @@ let require_does_not_raise
   ?sanitize
   ?sexp_style
   ?show_backtrace
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   f
   =
   match try_with f ?show_backtrace ?sanitize ~raise_message:"unexpectedly raised" with
@@ -570,7 +567,7 @@ let require_does_raise
   ?sanitize
   ?sexp_style
   ?show_backtrace
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   f
   =
   match try_with f ?show_backtrace ?sanitize with
@@ -586,7 +583,7 @@ let require_first_gen
   ?(print_first : (first -> Sexp.t) option)
   ?sexp_style
   ~message
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   (sexp_of_second : second -> Sexp.t)
   (either : (first, second) Either.t)
   =
@@ -606,7 +603,7 @@ let require_second
   ?hide_positions
   ?print_second
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   print_first
   either
   =
@@ -621,14 +618,7 @@ let require_second
     (Either.swap either)
 ;;
 
-let require_some
-  ?cr
-  ?hide_positions
-  ?print_some
-  ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
-  option
-  =
+let require_some ?cr ?hide_positions ?print_some ?sexp_style ~(here : [%call_pos]) option =
   require_first_gen
     ?cr
     ~message:"unexpected [None]"
@@ -642,14 +632,7 @@ let require_some
      | None -> Second ())
 ;;
 
-let require_this
-  ?cr
-  ?hide_positions
-  ?print_some
-  ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
-  option
-  =
+let require_this ?cr ?hide_positions ?print_some ?sexp_style ~(here : [%call_pos]) option =
   require_first_gen
     ?cr
     ~message:"unexpected [Null]"
@@ -663,13 +646,7 @@ let require_this
      | Null -> Second ())
 ;;
 
-let require_none
-  ?cr
-  ?hide_positions
-  ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
-  sexp_of_some
-  option
+let require_none ?cr ?hide_positions ?sexp_style ~(here : [%call_pos]) sexp_of_some option
   =
   require_first_gen
     ?cr
@@ -683,13 +660,7 @@ let require_none
      | Some some -> Second some)
 ;;
 
-let require_null
-  ?cr
-  ?hide_positions
-  ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
-  sexp_of_some
-  option
+let require_null ?cr ?hide_positions ?sexp_style ~(here : [%call_pos]) sexp_of_some option
   =
   require_first_gen
     ?cr
@@ -708,7 +679,7 @@ let require_ok_result
   ?hide_positions
   ?print_ok
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   sexp_of_error
   result
   =
@@ -730,7 +701,7 @@ let require_error_result
   ?hide_positions
   ?print_error
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   sexp_of_ok
   result
   =
@@ -747,14 +718,7 @@ let require_error_result
      | Ok ok -> Second ok)
 ;;
 
-let require_ok
-  ?cr
-  ?hide_positions
-  ?print_ok
-  ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
-  res
-  =
+let require_ok ?cr ?hide_positions ?print_ok ?sexp_style ~(here : [%call_pos]) res =
   require_ok_result
     ?cr
     ?hide_positions
@@ -770,7 +734,7 @@ let require_error
   ?hide_positions
   ?(print_error = false)
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   sexp_of_ok
   res
   =
@@ -779,11 +743,11 @@ let require_error
 ;;
 
 let print_and_check_round_trip
-  (type a)
+  (type a : value_or_null)
   ?cr
   ?hide_positions
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   (module T : With_equal with type t = a)
   reprs
   examples
@@ -839,7 +803,7 @@ let print_and_check_stringable
   ?cr
   ?hide_positions
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   (module T : With_stringable with type t = a)
   list
   =
@@ -873,7 +837,7 @@ let print_and_check_sexpable
   ?cr
   ?hide_positions
   ?sexp_style
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   (module T : With_sexpable with type t = a)
   list
   =
@@ -915,8 +879,8 @@ let show_raise
 ;;
 
 let quickcheck_m
-  (type a)
-  ?(here = Stdlib.Lexing.dummy_pos)
+  (type a : value_or_null)
+  ~(here : [%call_pos])
   ?config
   ?cr
   ?examples
@@ -942,8 +906,8 @@ let quickcheck_m
 ;;
 
 let quickcheck
-  (type a)
-  ?(here = Stdlib.Lexing.dummy_pos)
+  (type a : value_or_null)
+  ~(here : [%call_pos])
   ?cr
   ?hide_positions
   ?sexp_style
@@ -990,7 +954,7 @@ struct
 end
 
 let test_compare
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   ?config
   ?cr
   ?hide_positions
@@ -1058,7 +1022,7 @@ let test_compare
 ;;
 
 let test_equal
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   ?config
   ?cr
   ?hide_positions
@@ -1122,7 +1086,7 @@ let test_equal
 ;;
 
 let test_compare_and_equal
-  ?(here = Stdlib.Lexing.dummy_pos)
+  ~(here : [%call_pos])
   ?config
   ?cr
   ?hide_positions
@@ -1168,6 +1132,6 @@ let with_sexp_round_floats f ~significant_digits =
     ~f
 ;;
 
-let hide_positions_in_expect_test_output ?(here = Stdlib.Lexing.dummy_pos) () =
+let hide_positions_in_expect_test_output ~(here : [%call_pos]) () =
   print_string ~hide_positions:true (expect_test_output ~here ())
 ;;

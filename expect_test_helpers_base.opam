@@ -19,7 +19,7 @@ depends: [
   "sexp_pretty"
   "stdio"
   "dune"            {>= "3.17.0"}
-  "re"              {>= "1.8.0"}
+  "re"              {= "1.14.0+ox"}
 ]
 available: arch != "x86_32"
 synopsis: "Helpers for writing expectation tests"

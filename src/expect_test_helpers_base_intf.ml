@@ -21,15 +21,15 @@ module Sexp_style = struct
 end
 
 module type%template [@mode m = (local, global)] With_compare = sig
-  type t [@@deriving (compare [@mode.explicit m]), sexp_of]
+  type t : any [@@deriving (compare [@mode.explicit m]), sexp_of]
 end
 
 module type%template [@mode m = (local, global)] With_equal = sig
-  type t [@@deriving (equal [@mode.explicit m]), sexp_of]
+  type t : any [@@deriving (equal [@mode.explicit m]), sexp_of]
 end
 
 module type With_round_trip = sig
-  type t
+  type t : value_or_null
   type repr [@@deriving sexp_of]
 
   val to_repr : t -> repr
@@ -68,7 +68,7 @@ end
 
 module Quickcheck = Base_quickcheck
 
-module type Expect_test_helpers_base = sig
+module type Expect_test_helpers_base = sig @@ portable
   (** Helpers for producing output inside [let%expect_test]. Designed for code using
       [Base]. See also [Expect_test_helpers_core] and [Expect_test_helpers_async]. *)
 
@@ -110,7 +110,7 @@ module type Expect_test_helpers_base = sig
     val simple_pretty : t
   end
 
-  module Expectation : sig
+  module (Expectation @@ nonportable) : sig
     (** Tools for managing [[%expectation]] blocks. *)
 
     (** All functions in this module raise if called outside an expect test. *)
@@ -127,7 +127,7 @@ module type Expect_test_helpers_base = sig
         [let%expect_test]. *)
 
     (** Returns [true] if there is currently an active expectation, [false] otherwise. *)
-    val is_active : ?here:Stdlib.Lexing.position -> unit -> bool
+    val is_active : here:[%call_pos] -> unit -> bool
 
     (** Accepts the test result for the currently active expectation.
 
@@ -139,7 +139,7 @@ module type Expect_test_helpers_base = sig
         replaced by a [[%expectation.never_committed]] node in the corrected file.
 
         Raises if no expectation is active (i.e., if [is_active ()] returns [false]). *)
-    val commit : ?here:Stdlib.Lexing.position -> unit -> unit
+    val commit : here:[%call_pos] -> unit -> unit
 
     (** Skips the currently active expectation.
 
@@ -158,7 +158,7 @@ module type Expect_test_helpers_base = sig
         The [[%expect]] block at the end of the test receives no input.
 
         Raises if no expectation is active (i.e., if [is_active ()] returns [false]). *)
-    val skip : ?here:Stdlib.Lexing.position -> unit -> unit
+    val skip : here:[%call_pos] -> unit -> unit
 
     (** Like [skip ()], but also resets the collected input. So the test from the [skip]
         documentation would instead look like this:
@@ -172,7 +172,7 @@ module type Expect_test_helpers_base = sig
         ]}
 
         Raises if no expectation is active (i.e., if [is_active ()] returns [false]). *)
-    val reset : ?here:Stdlib.Lexing.position -> unit -> unit
+    val reset : here:[%call_pos] -> unit -> unit
 
     (** {2 Expectation helpers}
 
@@ -182,22 +182,22 @@ module type Expect_test_helpers_base = sig
 
     (** Produces the output consumed by the currently active expectation. Raises if no
         expectation is active. *)
-    val actual : ?here:Stdlib.Lexing.position -> unit -> string
+    val actual : here:[%call_pos] -> unit -> string
 
     (** Produces the output expected by the currently active expectation. Is [None] for
         [[%expectation.never_committed]] blocks. Raises if no expectation is active. *)
-    val expected : ?here:Stdlib.Lexing.position -> unit -> string option
+    val expected : here:[%call_pos] -> unit -> string option
 
     (** Reports whether [actual ()] matches [expected ()] for the currently active
         expectation. This is not the same as [String.equal (actual ()) (expected ())] due
         to whitespace normalization. Raises if no expectation is active. *)
-    val is_successful : ?here:Stdlib.Lexing.position -> unit -> bool
+    val is_successful : here:[%call_pos] -> unit -> bool
 
     (**/**)
 
     (** Produces a sexp representing the state of the currently active expectation. Raises
         if no expectation is active. *)
-    val sexp_for_debugging : ?here:Stdlib.Lexing.position -> unit -> Sexp.t
+    val sexp_for_debugging : here:[%call_pos] -> unit -> Sexp.t
   end
 
   (** [hide_paths_in_string] strips directory prefixes from source file paths, preserving
@@ -225,14 +225,14 @@ module type Expect_test_helpers_base = sig
     :  ?hide_positions:bool (** default is [false] *)
     -> ?hide_paths:bool (** default is [false] *)
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
-    -> Sexp.t
+    -> Sexp.t @ local
     -> string
 
   (** Substitutes [with_] for every occurrence of [pattern] in a string. *)
-  val replace : string -> pattern:string -> with_:string -> string
+  val replace : string -> pattern:string @ local -> with_:string @ local -> string
 
   (** Like [replace], for every atom in a sexp. *)
-  val replace_s : Sexp.t -> pattern:string -> with_:string -> Sexp.t
+  val replace_s : Sexp.t -> pattern:string @ local -> with_:string @ local -> Sexp.t
 
   (** Applies [f] at every node in the given sexp, top-down, recurring on the contents of
       the output. The word "smash" is used as in the sexp command-line tool's query
@@ -248,7 +248,7 @@ module type Expect_test_helpers_base = sig
     :  ?hide_positions:bool (** default is [false] *)
     -> ?hide_paths:bool (** default is [false] *)
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
-    -> Sexp.t
+    -> Sexp.t @ local
     -> unit
 
   val print_string : ?hide_positions:bool (** default is [false] *) -> string -> unit
@@ -257,7 +257,7 @@ module type Expect_test_helpers_base = sig
   (** Behaves like [[%expect.output]].
 
       Raises if called when not running an expect test. *)
-  val expect_test_output : ?here:Stdlib.Lexing.position -> unit -> string
+  val expect_test_output : here:[%call_pos] -> unit -> string @@ nonportable
 
   (** Sets aside output generated up to now. Within the callback, only new output will be
       captured by [[%expect]], [[%expect.output]], and the like. After the callback, the
@@ -267,7 +267,7 @@ module type Expect_test_helpers_base = sig
       without having to remove and re-add anything prior. For example, you could run some
       noisy tests inside this, then decide to erase their output if they did not trigger
       [on_print_cr] (below). *)
-  val with_empty_expect_test_output : ?here:Stdlib.Lexing.position -> (unit -> 'a) -> 'a
+  val with_empty_expect_test_output : here:[%call_pos] -> (unit -> 'a) @ local once -> 'a
 
   (** Raises an error if, in the current test:
       1. Control flow has reached a [[%expect.unreachable]] node or
@@ -277,11 +277,7 @@ module type Expect_test_helpers_base = sig
       An error raised in the above cases begins with [message], if provided.
 
       Also raises if called when not running an expect test. *)
-  val raise_if_output_did_not_match
-    :  ?message:string
-    -> ?here:Stdlib.Lexing.position
-    -> unit
-    -> unit
+  val raise_if_output_did_not_match : ?message:string -> here:[%call_pos] -> unit -> unit
 
   (** Returns [true] if running inside the body of [let%expect_test], or [false]
       otherwise. Use to test whether [expect_test_output] will raise, for example. Unlike
@@ -293,12 +289,12 @@ module type Expect_test_helpers_base = sig
       has no name (is defined via [let%expect_test _ = ...]).
 
       Raises if called when not running an expect test. *)
-  val current_expect_test_name_exn : ?here:Stdlib.Lexing.position -> unit -> string option
+  val current_expect_test_name_exn : here:[%call_pos] -> unit -> string option
 
   (** If [am_running_expect_test () = false], raises with an explanatory error message. Do
       not use [require am_running_expect_test], as outside of an expect test that may not
       accomplish anything. *)
-  val assert_am_running_expect_test : ?here:Stdlib.Lexing.position -> unit -> unit
+  val assert_am_running_expect_test : here:[%call_pos] -> unit -> unit
 
   (** [print_cr message] prints a [CR require-failed], which will appear in expect-test
       output. The CR will appear in the feature owner's [fe todo], thus preventing release
@@ -312,7 +308,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?hide_paths:bool (** default is [false] *)
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> Sexp.t
     -> unit
 
@@ -328,7 +324,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?if_false_then_print_s:Sexp.t Lazy.t
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> bool
     -> unit
 
@@ -338,9 +334,9 @@ module type Expect_test_helpers_base = sig
     :  ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> bool
-    -> (unit -> Sexp.t)
+    -> (unit -> Sexp.t) @ local once
     -> unit
 
   [%%template:
@@ -351,13 +347,13 @@ module type Expect_test_helpers_base = sig
       provided module. If the comparison fails, prints a message that renders the
       arguments as sexps. *)
   val require_equal
-    : 'a.
+    : ('a : k).
     ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?if_false_then_print_s:Sexp.t Lazy.t
     -> ?message:string
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ((module With_equal with type t = 'a)[@mode m])
     -> 'a
     -> 'a
@@ -365,13 +361,13 @@ module type Expect_test_helpers_base = sig
 
   (** Like [require_equal] but instead requires that the arguments are *not* equal. *)
   val require_not_equal
-    : 'a.
+    : ('a : k).
     ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?if_false_then_print_s:Sexp.t Lazy.t
     -> ?message:string
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ((module With_equal with type t = 'a)[@mode m])
     -> 'a
     -> 'a
@@ -379,12 +375,12 @@ module type Expect_test_helpers_base = sig
 
   (** Like [require_equal], but derives an equality predicate from a comparison function. *)
   val require_compare_equal
-    : 'a.
+    : ('a : k).
     ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?message:string
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ((module With_compare with type t = 'a)[@mode m])
     -> 'a
     -> 'a
@@ -393,12 +389,12 @@ module type Expect_test_helpers_base = sig
   (** Like [require_not_equal], but derives an equality predicate from a comparison
       function. *)
   val require_compare_not_equal
-    : 'a.
+    : ('a : k).
     ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?message:string
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ((module With_compare with type t = 'a)[@mode m])
     -> 'a
     -> 'a
@@ -411,7 +407,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?names:string * string (** default is ["first", "second"] *)
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ('elt, 'cmp) Set.t
     -> ('elt, 'cmp) Set.t
     -> unit
@@ -430,7 +426,7 @@ module type Expect_test_helpers_base = sig
     -> ?sanitize:(Sexp.t -> Sexp.t) (** default is Fn.id *)
     -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
     -> ?show_backtrace:bool (** default is [false] *)
-    -> (unit -> _)
+    -> (unit -> _) @ local once
     -> unit
 
   (** [require_does_not_raise] is like [show_raise], but does not print anything if the
@@ -445,22 +441,22 @@ module type Expect_test_helpers_base = sig
     -> ?sanitize:(Sexp.t -> Sexp.t) (** default is Fn.id *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
     -> ?show_backtrace:bool (** default is [false] *)
-    -> ?here:Stdlib.Lexing.position
-    -> (unit -> unit)
+    -> here:[%call_pos]
+    -> (unit -> unit) @ local once
     -> unit
 
   (** [require_does_raise] is like [show_raise], but additionally prints a CR if the
       function does not raise. *)
   val require_does_raise
-    : 'a.
+    : ('a : value_or_null).
     ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] *)
     -> ?hide_paths:bool (** default is [false] *)
     -> ?sanitize:(Sexp.t -> Sexp.t) (** default is Fn.id *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
     -> ?show_backtrace:bool (** default is [false] *)
-    -> ?here:Stdlib.Lexing.position
-    -> (unit -> 'a)
+    -> here:[%call_pos]
+    -> (unit -> 'a) @ local once
     -> unit
 
   (** [require_some option] is like [require (is_some option)], with improved output. If
@@ -471,7 +467,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?print_some:('some -> Sexp.t)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> 'some option
     -> unit
 
@@ -481,7 +477,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?print_some:('some -> Sexp.t)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> 'some or_null
     -> unit
 
@@ -492,7 +488,7 @@ module type Expect_test_helpers_base = sig
     :  ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ('some -> Sexp.t)
     -> 'some option
     -> unit
@@ -502,7 +498,7 @@ module type Expect_test_helpers_base = sig
     :  ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ('some -> Sexp.t)
     -> 'some or_null
     -> unit
@@ -515,7 +511,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?print_ok:('ok -> Sexp.t)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> 'ok Or_error.t
     -> unit
 
@@ -527,7 +523,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?print_error:bool (** default is [false] *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ('ok -> Sexp.t)
     -> 'ok Or_error.t
     -> unit
@@ -541,7 +537,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?print_ok:('ok -> Sexp.t)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ('error -> Sexp.t)
     -> ('ok, 'error) Result.t
     -> unit
@@ -555,7 +551,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?print_error:('error -> Sexp.t)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ('ok -> Sexp.t)
     -> ('ok, 'error) Result.t
     -> unit
@@ -569,7 +565,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true otherwise] *)
     -> ?print_first:('first -> Sexp.t)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ('second -> Sexp.t)
     -> ('first, 'second) Either.t
     -> unit
@@ -583,7 +579,7 @@ module type Expect_test_helpers_base = sig
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true otherwise] *)
     -> ?print_second:('second -> Sexp.t)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> ('first -> Sexp.t)
     -> ('first, 'second) Either.t
     -> unit
@@ -594,7 +590,7 @@ module type Expect_test_helpers_base = sig
     :  ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true otherwise] *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> (module With_stringable with type t = 'a)
     -> 'a list
     -> unit
@@ -605,7 +601,7 @@ module type Expect_test_helpers_base = sig
     :  ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true otherwise] *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> (module With_sexpable with type t = 'a)
     -> 'a list
     -> unit
@@ -614,11 +610,11 @@ module type Expect_test_helpers_base = sig
       multiple representations, includes the [repr_name] of each in the output. Tests that
       [to_repr] and [of_repr] round-trip for each representation. *)
   val print_and_check_round_trip
-    : 'a.
+    : ('a : value_or_null).
     ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true otherwise] *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?here:Stdlib.Lexing.position
+    -> here:[%call_pos]
     -> (module With_equal with type t = 'a)
     -> (module With_round_trip with type t = 'a) list
     -> 'a list
@@ -632,8 +628,8 @@ module type Expect_test_helpers_base = sig
       2. [quickcheck] stops after the first iteration that raises or prints a CR, as
          detected by [on_print_cr]. *)
   val quickcheck
-    : 'a.
-    ?here:Stdlib.Lexing.position
+    : ('a : value_or_null).
+    here:[%call_pos]
     -> ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
@@ -647,12 +643,13 @@ module type Expect_test_helpers_base = sig
     -> f:('a -> unit)
     -> 'a Quickcheck.Generator.t
     -> unit
+    @@ nonportable
 
   (** [quickcheck_m] is similar to [Base_quickcheck.Test.run]. It stops after the first
       iteration that raises or prints a CR, as detected by [on_print_cr]. *)
   val quickcheck_m
-    : 'a.
-    ?here:Stdlib.Lexing.position
+    : ('a : value_or_null).
+    here:[%call_pos]
     -> ?config:Base_quickcheck.Test.Config.t
          (** default is [Base_quickcheck.Test.default_config] *)
     -> ?cr:CR.t (** default is [CR] *)
@@ -662,11 +659,12 @@ module type Expect_test_helpers_base = sig
     -> (module Base_quickcheck.Test.S with type t = 'a)
     -> f:('a -> unit)
     -> unit
+    @@ nonportable
 
   (** [test_compare] uses quickcheck to test that a compare function is reflexive,
       asymmetric, and transitive. *)
   val test_compare
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?config:Base_quickcheck.Test.Config.t
          (** default is [Base_quickcheck.Test.default_config] *)
     -> ?cr:CR.t (** default is [CR] *)
@@ -674,11 +672,12 @@ module type Expect_test_helpers_base = sig
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
     -> (module With_quickcheck_and_compare)
     -> unit
+    @@ nonportable
 
   (** [test_equal] uses quickcheck to test that an equal function is reflexive, symmetric,
       and transitive. *)
   val test_equal
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?config:Base_quickcheck.Test.Config.t
          (** default is [Base_quickcheck.Test.default_config] *)
     -> ?cr:CR.t (** default is [CR] *)
@@ -686,12 +685,13 @@ module type Expect_test_helpers_base = sig
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
     -> (module With_quickcheck_and_equal)
     -> unit
+    @@ nonportable
 
   (** [test_compare_and_equal] uses quickcheck to test that compare and equal functions
       satisfy [test_compare] and [test_equal], and that their results are consistent with
       each other. *)
   val test_compare_and_equal
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?config:Base_quickcheck.Test.Config.t
          (** default is [Base_quickcheck.Test.default_config] *)
     -> ?cr:CR.t (** default is [CR] *)
@@ -699,6 +699,7 @@ module type Expect_test_helpers_base = sig
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
     -> (module With_quickcheck_and_compare_and_equal)
     -> unit
+    @@ nonportable
 
   (** [sexp_style] determines the sexp format used by [sexp_to_string], [print_s], and
       other functions in this module. Defaults to [Sexp_style.default_pretty]. *)
@@ -718,5 +719,9 @@ module type Expect_test_helpers_base = sig
 
   (** Updates the currently collected expect test output to hide positions. Equivalent to
       [print_string ~hide_positions:true [%expect.output]]. *)
-  val hide_positions_in_expect_test_output : ?here:Stdlib.Lexing.position -> unit -> unit
+  val hide_positions_in_expect_test_output
+    :  here:[%call_pos]
+    -> unit
+    -> unit
+    @@ nonportable
 end
