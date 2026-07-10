@@ -310,6 +310,25 @@ let%expect_test "[show_raise] ignores return value" =
   [%expect {| "did not raise" |}]
 ;;
 
+let%expect_test "[show_raise_and_return]" =
+  let test f =
+    let result = show_raise_and_return f in
+    print_s [%sexp (result : (string, [ `already_shown ]) Result.t)]
+  in
+  test (fun () -> "success");
+  [%expect
+    {|
+    "did not raise"
+    (Ok success)
+    |}];
+  test (fun () -> raise_s (Atom "failure"));
+  [%expect
+    {|
+    (raised failure)
+    (Error already_shown)
+    |}]
+;;
+
 let%expect_test "[require] true prints nothing" =
   require true;
   [%expect {| |}]
@@ -321,6 +340,15 @@ let%expect_test "[print_cr]" =
     {|
     (* require-failed: lib/expect_test_helpers/base/test/test_expect_test_helpers_base.ml:LINE:COL. *)
     "some message"
+    |}]
+;;
+
+let%expect_test "[print_cr ~hide_paths:true] hides paths in the CR header" =
+  print_cr ~cr:Comment ~hide_paths:true [%message [%here]];
+  [%expect
+    {|
+    (* require-failed: test_expect_test_helpers_base.ml:LINE:COL. *)
+    test_expect_test_helpers_base.ml:LINE:COL
     |}]
 ;;
 
@@ -515,6 +543,22 @@ let%expect_test "[require_does_not_raise] with a deep stack" =
     |}]
 ;;
 
+let%expect_test "[require_does_not_raise_and_return]" =
+  let test f =
+    let result = require_does_not_raise_and_return ~cr:Comment f in
+    print_s [%sexp (result : (string, [ `already_shown ]) Result.t)]
+  in
+  test (fun () -> "success");
+  [%expect {| (Ok success) |}];
+  test (fun () -> raise_s (Atom "failure"));
+  [%expect
+    {|
+    (* require-failed: lib/expect_test_helpers/base/test/test_expect_test_helpers_base.ml:LINE:COL. *)
+    ("unexpectedly raised" failure)
+    (Error already_shown)
+    |}]
+;;
+
 let%expect_test "[require_does_raise] failure" =
   require_does_raise ~here:nowhere ~cr:Comment (fun () -> ());
   [%expect
@@ -554,6 +598,26 @@ let%expect_test "[require_does_raise ~hide_paths:true] success" =
   require_does_raise ~hide_paths:true ~hide_positions:true (fun () ->
     raise_s [%message [%here]]);
   [%expect {| test_expect_test_helpers_base.ml:LINE:COL |}]
+;;
+
+let%expect_test "[require_does_raise ~hide_paths:true] failure hides paths in CR header" =
+  require_does_raise ~cr:Comment ~hide_paths:true ~hide_positions:true (fun () -> ());
+  [%expect
+    {|
+    (* require-failed: test_expect_test_helpers_base.ml:LINE:COL. *)
+    "did not raise"
+    |}]
+;;
+
+let%expect_test "[require_does_not_raise ~hide_paths:true] hides paths in CR header" =
+  require_does_not_raise ~cr:Comment ~hide_paths:true ~hide_positions:true (fun () ->
+    raise_s [%message [%here]]);
+  [%expect
+    {|
+    (* require-failed: test_expect_test_helpers_base.ml:LINE:COL. *)
+    ("unexpectedly raised"
+     test_expect_test_helpers_base.ml:LINE:COL)
+    |}]
 ;;
 
 include struct

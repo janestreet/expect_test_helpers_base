@@ -1,7 +1,7 @@
 open! Base
 open! Portable
 open! Stdio
-include Expect_test_helpers_base_intf
+include Expect_test_helpers_base_intf.Definitions
 
 let print_string string =
   print_string string;
@@ -135,14 +135,22 @@ let hide_positions_in_string =
       ~f:(fun ac { portable = expander } -> expander ac)
 ;;
 
-let maybe_hide_positions_in_string ?(hide_positions = false) ?(hide_paths = false) string =
+let maybe_hide_positions_in_string ~hide_positions ~hide_paths string =
+  let hide_positions = Option.value hide_positions ~default:false in
+  let hide_paths = Option.value hide_paths ~default:false in
   let string = if hide_paths then hide_paths_in_string string else string in
   if hide_positions then hide_positions_in_string string else string
 ;;
 
 let sexp_style = Dynamic.make Sexp_style.default_pretty
 
-let sexp_to_string ?hide_positions ?hide_paths ?sexp_style:sexp_style_option sexp =
+(* Like [sexp_to_string], but requires [hide_positions] and [hide_paths] as explicit
+   options to make it more difficult to forget them in the implementations of other
+   functions in this module.
+
+   We do the same for [print_s] and [print_cr]. *)
+let sexp_to_string_internal ~hide_positions ~hide_paths ?sexp_style:sexp_style_option sexp
+  =
   let string =
     match
       match sexp_style_option with
@@ -155,7 +163,7 @@ let sexp_to_string ?hide_positions ?hide_paths ?sexp_style:sexp_style_option sex
       let sexp = Sexp.globalize sexp in
       Sexp_pretty.pretty_string config sexp
   in
-  maybe_hide_positions_in_string ?hide_positions ?hide_paths string
+  maybe_hide_positions_in_string ~hide_positions ~hide_paths string
 ;;
 
 let replace = String.substr_replace_all
@@ -225,7 +233,7 @@ let assert_am_running_expect_test ~(here : [%call_pos]) () =
 
 let wrap f =
   (Staged.stage [@mode portable]) (fun ?hide_positions string ->
-    f (maybe_hide_positions_in_string ?hide_positions string))
+    f (maybe_hide_positions_in_string ~hide_positions ~hide_paths:None string))
 ;;
 
 let rec smash_sexp sexp ~f =
@@ -269,25 +277,31 @@ end
 let print_endline = (Staged.unstage [@mode portable]) (wrap print_endline)
 let print_string = (Staged.unstage [@mode portable]) (wrap print_string)
 
-let print_s ?hide_positions ?hide_paths ?sexp_style sexp =
-  print_string (sexp_to_string ?hide_positions ?hide_paths ?sexp_style sexp)
+let print_s_internal ~hide_positions ~hide_paths ?sexp_style sexp =
+  print_string (sexp_to_string_internal ~hide_positions ~hide_paths ?sexp_style sexp)
 ;;
 
 let on_print_cr = Dynamic.make (fun string -> print_endline string)
 
 let print_cr_with_optional_message
   ?(cr = CR.CR)
-  ?(hide_positions = CR.hide_unstable_output cr)
-  ?hide_paths
+  ~hide_positions
+  ~hide_paths
   ?sexp_style
   ~(here : [%call_pos])
   optional_message
   =
   assert_am_running_expect_test ~here ();
+  let hide_positions =
+    Option.value hide_positions ~default:(CR.hide_unstable_output cr)
+  in
   match cr with
   | Suppress -> ()
   | _ ->
-    let cr = CR.message cr here |> maybe_hide_positions_in_string ~hide_positions in
+    let cr =
+      CR.message cr here
+      |> maybe_hide_positions_in_string ~hide_positions:(Some hide_positions) ~hide_paths
+    in
     (Dynamic.get on_print_cr)
       (match optional_message with
        | None -> cr
@@ -295,15 +309,27 @@ let print_cr_with_optional_message
          String.concat
            [ cr
            ; "\n"
-           ; String.rstrip (sexp_to_string ~hide_positions ?hide_paths ?sexp_style sexp)
+           ; String.rstrip
+               (sexp_to_string_internal
+                  ~hide_positions:(Some hide_positions)
+                  ~hide_paths
+                  ?sexp_style
+                  sexp)
            ])
 ;;
 
-let print_cr ?cr ?hide_positions ?hide_paths ?sexp_style ~(here : [%call_pos]) message =
+let print_cr_internal
+  ?cr
+  ~hide_positions
+  ~hide_paths
+  ?sexp_style
+  ~(here : [%call_pos])
+  message
+  =
   print_cr_with_optional_message
     ?cr
-    ?hide_positions
-    ?hide_paths
+    ~hide_positions
+    ~hide_paths
     ?sexp_style
     ~here
     (Some message)
@@ -311,7 +337,7 @@ let print_cr ?cr ?hide_positions ?hide_paths ?sexp_style ~(here : [%call_pos]) m
 
 let require_internal
   ?cr
-  ?hide_positions
+  ~hide_positions
   ~(local_ if_false_then_print_s)
   ?sexp_style
   ~(here : [%call_pos])
@@ -321,7 +347,13 @@ let require_internal
   | true -> ()
   | false ->
     let msg = if_false_then_print_s () in
-    print_cr_with_optional_message ?cr ?hide_positions ?sexp_style ~here msg
+    print_cr_with_optional_message
+      ?cr
+      ~hide_positions
+      ~hide_paths:None
+      ?sexp_style
+      ~here
+      msg
 ;;
 
 let print_cr_if_false
@@ -334,7 +366,7 @@ let print_cr_if_false
   =
   require_internal
     ?cr
-    ?hide_positions
+    ~hide_positions
     ?sexp_style
     ~here
     bool
@@ -355,7 +387,7 @@ let require
   in
   require_internal
     ?cr
-    ?hide_positions
+    ~hide_positions
     ?sexp_style
     ~here
     bool
@@ -390,7 +422,7 @@ let require_equal
   in
   require_internal
     ?cr
-    ?hide_positions
+    ~hide_positions
     ?sexp_style
     ~here
     ((M.equal [@mode m]) x y)
@@ -409,19 +441,20 @@ let require_not_equal
   x
   y
   =
-  require
+  require_internal
     ?cr
-    ?hide_positions
+    ~hide_positions
     ?sexp_style
     ~here
     (not ((M.equal [@mode m]) x y))
-    ~if_false_then_print_s:
-      (lazy
+    ~if_false_then_print_s:(stack_ fun () ->
+      Some
         [%message
           message
             ~_:(x : M.t)
             ~_:(y : M.t)
             ~_:(if_false_then_print_s : (Sexp.t Base.Lazy.t option[@sexp.option]))])
+  [@nontail]
 ;;
 
 let require_compare_equal
@@ -492,32 +525,33 @@ let require_sets_are_equal
     let sexp_of_t = Set.comparator first |> Comparator.sexp_of_t
   end
   in
-  require
+  require_internal
     ?cr
-    ?hide_positions
+    ~hide_positions
     ?sexp_style
     ~here
     (Set.equal first second)
-    ~if_false_then_print_s:
-      (lazy
-        (let show_diff (name1, set1) (name2, set2) =
-           let diff = Set.diff set1 set2 in
-           if Set.is_empty diff
-           then [%message]
-           else
-             [%message
-               (Printf.sprintf "in %s but not in %s" name1 name2) ~_:(diff : Set.M(Elt).t)]
-         in
-         let first = fst names, first in
-         let second = snd names, second in
-         [%message.omit_nil
-           "sets are not equal"
-             ~_:(show_diff first second : Sexp.t)
-             ~_:(show_diff second first : Sexp.t)]))
+    ~if_false_then_print_s:(stack_ fun () ->
+      let show_diff (name1, set1) (name2, set2) =
+        let diff = Set.diff set1 set2 in
+        if Set.is_empty diff
+        then [%message]
+        else
+          [%message
+            (Printf.sprintf "in %s but not in %s" name1 name2) ~_:(diff : Set.M(Elt).t)]
+      in
+      let first = fst names, first in
+      let second = snd names, second in
+      Some
+        [%message.omit_nil
+          "sets are not equal"
+            ~_:(show_diff first second : Sexp.t)
+            ~_:(show_diff second first : Sexp.t)])
+  [@nontail]
 ;;
 
-type try_with_result =
-  | Did_not_raise
+type ('a : value_or_null) try_with_result =
+  | Did_not_raise of 'a
   | Raised of Sexp.t
 
 let try_with
@@ -525,11 +559,11 @@ let try_with
   ?(show_backtrace = false)
   ?(sanitize = Fn.id)
   (type a : value_or_null)
-  (f : unit -> a @ local once)
+  (f : (unit -> a) @ local once)
   =
   Backtrace.Exn.with_recording show_backtrace ~f:(fun () ->
-    match ignore (f () : a) with
-    | () -> Did_not_raise
+    match f () with
+    | (a : a) -> Did_not_raise a
     | exception exn ->
       let backtrace =
         if not show_backtrace then None else Some (Backtrace.Exn.most_recent ())
@@ -545,7 +579,7 @@ let try_with
   [@nontail]
 ;;
 
-let require_does_not_raise
+let require_does_not_raise_and_return
   ?cr
   ?hide_positions
   ?hide_paths
@@ -556,8 +590,33 @@ let require_does_not_raise
   f
   =
   match try_with f ?show_backtrace ?sanitize ~raise_message:"unexpectedly raised" with
-  | Did_not_raise -> ()
-  | Raised message -> print_cr ?cr ?hide_positions ?hide_paths ?sexp_style ~here message
+  | Did_not_raise x -> Ok x
+  | Raised message ->
+    print_cr_internal ?cr ~hide_positions ~hide_paths ?sexp_style ~here message;
+    Error `already_shown
+;;
+
+let require_does_not_raise
+  ?cr
+  ?hide_positions
+  ?hide_paths
+  ?sanitize
+  ?sexp_style
+  ?show_backtrace
+  ~(here : [%call_pos])
+  f
+  =
+  ignore
+    (require_does_not_raise_and_return
+       ?cr
+       ?hide_positions
+       ?hide_paths
+       ?sanitize
+       ?sexp_style
+       ?show_backtrace
+       ~here
+       f
+     : (_, _) Result.t)
 ;;
 
 let require_does_raise
@@ -571,9 +630,16 @@ let require_does_raise
   f
   =
   match try_with f ?show_backtrace ?sanitize with
-  | Raised message -> print_s ~hide_positions ?hide_paths ?sexp_style message
-  | Did_not_raise ->
-    print_cr ?cr ~hide_positions ?sexp_style ~here [%message "did not raise"]
+  | Raised message ->
+    print_s_internal ~hide_positions:(Some hide_positions) ~hide_paths ?sexp_style message
+  | Did_not_raise _ ->
+    print_cr_internal
+      ?cr
+      ~hide_positions:(Some hide_positions)
+      ~hide_paths
+      ?sexp_style
+      ~here
+      [%message "did not raise"]
 ;;
 
 let require_first_gen
@@ -591,9 +657,20 @@ let require_first_gen
   | First first ->
     (match print_first with
      | None -> ()
-     | Some sexp_of_first -> print_s ?hide_positions ?sexp_style [%sexp (first : first)])
+     | Some sexp_of_first ->
+       print_s_internal
+         ~hide_positions
+         ~hide_paths:None
+         ?sexp_style
+         [%sexp (first : first)])
   | Second second ->
-    print_cr ?cr ?hide_positions ?sexp_style ~here [%message message ~_:(second : second)]
+    print_cr_internal
+      ?cr
+      ~hide_positions
+      ~hide_paths:None
+      ?sexp_style
+      ~here
+      [%message message ~_:(second : second)]
 ;;
 
 let require_first = require_first_gen ~message:"unexpected [Second]"
@@ -742,13 +819,13 @@ let require_error
   require_error_result ?cr ?hide_positions ?print_error ?sexp_style ~here sexp_of_ok res
 ;;
 
-let print_and_check_round_trip
+let%template[@mode m = (local, global)] print_and_check_round_trip
   (type a : value_or_null)
   ?cr
   ?hide_positions
   ?sexp_style
   ~(here : [%call_pos])
-  (module T : With_equal with type t = a)
+  (module T : With_equal with type t = a[@mode m])
   reprs
   examples
   =
@@ -771,31 +848,34 @@ let print_and_check_round_trip
        | [] -> (* a useless case anyway *) ()
        | [ (_, sexp, _) ] ->
          (* only one repr, print unlabeled *)
-         print_s ?hide_positions ?sexp_style sexp
+         print_s_internal ~hide_positions ~hide_paths:None ?sexp_style sexp
        | _ :: _ :: _ ->
          (* multiple reprs, print with labels *)
-         print_s
-           ?hide_positions
+         print_s_internal
+           ~hide_positions
+           ~hide_paths:None
            ?sexp_style
            (List
               (List.map conversions ~f:(fun (name, sexp, _) ->
                  [%sexp (tag_of name : string), (sexp : Sexp.t)]))));
       (* check two-way round-trip *)
       List.iter conversions ~f:(fun (name, sexp, round_trip) ->
-        require
+        require_internal
           ?cr
-          ?hide_positions
+          ~hide_positions
           ?sexp_style
           ~here
           (T.equal t round_trip)
-          ~if_false_then_print_s:
-            (lazy
+          ~if_false_then_print_s:(stack_ fun () ->
+            Some
               (Sexp.message
                  (name ^ " serialization failed to round-trip")
                  [ "original", T.sexp_of_t t
                  ; tag_of name, sexp
                  ; tag_of name ^ "_roundtrip", T.sexp_of_t round_trip
-                 ])))))
+                 ]))
+        [@nontail])))
+  [@nontail]
 ;;
 
 let print_and_check_stringable
@@ -860,7 +940,7 @@ let print_and_check_sexpable
     list
 ;;
 
-let show_raise
+let show_raise_and_return
   (type a)
   ?hide_positions
   ?hide_paths
@@ -869,13 +949,25 @@ let show_raise
   ?show_backtrace
   (f : unit -> a)
   =
-  print_s
-    ?hide_positions
-    ?hide_paths
-    ?sexp_style
-    (match try_with f ?show_backtrace ?sanitize ~raise_message:"raised" with
-     | Did_not_raise -> [%message "did not raise"]
-     | Raised message -> message)
+  let result, to_print =
+    match try_with f ?show_backtrace ?sanitize ~raise_message:"raised" with
+    | Did_not_raise value -> Ok value, [%message "did not raise"]
+    | Raised message -> Error `already_shown, message
+  in
+  print_s_internal ~hide_positions ~hide_paths ?sexp_style to_print;
+  result
+;;
+
+let show_raise ?hide_positions ?hide_paths ?sanitize ?sexp_style ?show_backtrace f =
+  ignore
+    (show_raise_and_return
+       ?hide_positions
+       ?hide_paths
+       ?sanitize
+       ?sexp_style
+       ?show_backtrace
+       f
+     : (_, _) Result.t)
 ;;
 
 let quickcheck_m
@@ -901,7 +993,11 @@ let quickcheck_m
     let crs = Atomic.get crs |> List.rev in
     if List.is_empty crs then Ok () else Error crs)
   |> Result.iter_error ~f:(fun (input, output) ->
-    print_s ?hide_positions ?sexp_style [%message "quickcheck: test failed" (input : M.t)];
+    print_s_internal
+      ~hide_positions
+      ~hide_paths:None
+      ?sexp_style
+      [%message "quickcheck: test failed" (input : M.t)];
     List.iter output ~f:print_endline)
 ;;
 
@@ -938,15 +1034,16 @@ let quickcheck
     ~f
 ;;
 
-module Tuple2 (M : Quickcheck.Test.S) : Quickcheck.Test.S with type t = M.t * M.t = struct
+module Tuple2 (M : Base_quickcheck.Test.S) :
+  Base_quickcheck.Test.S with type t = M.t * M.t = struct
   type t = M.t * M.t [@@deriving sexp_of]
 
   let quickcheck_generator = [%quickcheck.generator: M.t * M.t]
   let quickcheck_shrinker = [%quickcheck.shrinker: M.t * M.t]
 end
 
-module Tuple3 (M : Quickcheck.Test.S) : Quickcheck.Test.S with type t = M.t * M.t * M.t =
-struct
+module Tuple3 (M : Base_quickcheck.Test.S) :
+  Base_quickcheck.Test.S with type t = M.t * M.t * M.t = struct
   type t = M.t * M.t * M.t [@@deriving sexp_of]
 
   let quickcheck_generator = [%quickcheck.generator: M.t * M.t * M.t]
@@ -962,7 +1059,14 @@ let test_compare
   (module M : With_quickcheck_and_compare)
   =
   let check bool msg =
-    require ~here ?cr ?hide_positions ?sexp_style bool ~if_false_then_print_s:msg
+    require_internal
+      ~here
+      ?cr
+      ~hide_positions
+      ?sexp_style
+      bool
+      ~if_false_then_print_s:(stack_ fun () -> Some (force msg))
+    [@nontail]
   in
   let check_reflexive x =
     let compare_x_x = M.compare x x in
@@ -1030,7 +1134,14 @@ let test_equal
   (module M : With_quickcheck_and_equal)
   =
   let check bool msg =
-    require ~here ?cr ?hide_positions ?sexp_style bool ~if_false_then_print_s:msg
+    require_internal
+      ~here
+      ?cr
+      ~hide_positions
+      ?sexp_style
+      bool
+      ~if_false_then_print_s:(stack_ fun () -> Some (force msg))
+    [@nontail]
   in
   let check_reflexive x =
     let equal_x_x = M.equal x x in
@@ -1098,19 +1209,20 @@ let test_compare_and_equal
   let check_agreement x y =
     let compare_x_y = M.compare x y in
     let equal_x_y = M.equal x y in
-    require
+    require_internal
       ~here
       ?cr
-      ?hide_positions
+      ~hide_positions
       ?sexp_style
       (Bool.equal equal_x_y (compare_x_y = 0))
-      ~if_false_then_print_s:
-        [%lazy_message
-          "[compare] and [equal] do not agree"
-            (x : M.t)
-            (y : M.t)
-            (compare_x_y : int)
-            (equal_x_y : bool)]
+      ~if_false_then_print_s:(stack_ fun () ->
+        Some
+          [%message
+            "[compare] and [equal] do not agree"
+              (x : M.t)
+              (y : M.t)
+              (compare_x_y : int)
+              (equal_x_y : bool)]) [@nontail]
   in
   quickcheck_m
     ~here
@@ -1134,4 +1246,17 @@ let with_sexp_round_floats f ~significant_digits =
 
 let hide_positions_in_expect_test_output ~(here : [%call_pos]) () =
   print_string ~hide_positions:true (expect_test_output ~here ())
+;;
+
+(* Rebind functions used internally to accept true optional arguments *)
+let sexp_to_string ?hide_positions ?hide_paths ?sexp_style sexp =
+  sexp_to_string_internal ~hide_positions ~hide_paths ?sexp_style sexp
+;;
+
+let print_s ?hide_positions ?hide_paths ?sexp_style sexp =
+  print_s_internal ~hide_positions ~hide_paths ?sexp_style sexp
+;;
+
+let print_cr ?cr ?hide_positions ?hide_paths ?sexp_style ~(here : [%call_pos]) message =
+  print_cr_internal ?cr ~hide_positions ~hide_paths ?sexp_style ~here message
 ;;

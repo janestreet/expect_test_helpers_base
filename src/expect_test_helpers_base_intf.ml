@@ -1,87 +1,80 @@
 open! Base
 
-module CR = struct
-  type t =
-    | CR
-    | CR_soon
-    | CR_soon_for of string
-    | CR_someday
-    | CR_for_child
-    | Comment
-    | Suppress
-  [@@deriving sexp_of ~portable]
+module Definitions = struct
+  module CR = struct
+    type t =
+      | CR
+      | CR_soon
+      | CR_soon_for of string
+      | CR_someday
+      | CR_for_child
+      | Comment
+      | Suppress
+    [@@deriving sexp_of ~portable]
+  end
+
+  module Sexp_style = struct
+    type t =
+      | To_string_mach
+      | To_string_hum
+      | Pretty of Sexp_pretty.Config.t
+    [@@deriving sexp_of ~portable]
+  end
+
+  module type%template [@mode m = (local, global)] With_compare = sig
+    type t : any [@@deriving (compare [@mode.explicit m]), sexp_of]
+  end
+
+  module type%template [@mode m = (local, global)] With_equal = sig
+    type t : any [@@deriving (equal [@mode.explicit m]), sexp_of]
+  end
+
+  module type With_round_trip = sig
+    type t : value_or_null
+    type repr [@@deriving sexp_of]
+
+    val to_repr : t -> repr
+    val of_repr : repr -> t
+    val repr_name : string
+  end
+
+  module type%template [@mode m = (local, global)] With_sexpable = sig
+    type t [@@deriving (equal [@mode.explicit m]), sexp]
+  end
+
+  module type%template [@mode m = (local, global)] With_stringable = sig
+    type t [@@deriving equal [@mode.explicit m]]
+
+    include Stringable.S with type t := t
+  end
+
+  module type%template [@mode m = (local, global)] With_quickcheck_and_compare = sig
+    type t [@@deriving compare [@mode.explicit m]]
+
+    include Base_quickcheck.Test.S with type t := t
+  end
+
+  module type%template [@mode m = (local, global)] With_quickcheck_and_equal = sig
+    type t [@@deriving equal [@mode.explicit m]]
+
+    include Base_quickcheck.Test.S with type t := t
+  end
+
+  module type%template
+    [@mode m = (local, global)] With_quickcheck_and_compare_and_equal = sig
+    type t [@@deriving (compare [@mode.explicit m]), (equal [@mode.explicit m])]
+
+    include Base_quickcheck.Test.S with type t := t
+  end
 end
-
-module Sexp_style = struct
-  type t =
-    | To_string_mach
-    | To_string_hum
-    | Pretty of Sexp_pretty.Config.t
-  [@@deriving sexp_of ~portable]
-end
-
-module type%template [@mode m = (local, global)] With_compare = sig
-  type t : any [@@deriving (compare [@mode.explicit m]), sexp_of]
-end
-
-module type%template [@mode m = (local, global)] With_equal = sig
-  type t : any [@@deriving (equal [@mode.explicit m]), sexp_of]
-end
-
-module type With_round_trip = sig
-  type t : value_or_null
-  type repr [@@deriving sexp_of]
-
-  val to_repr : t -> repr
-  val of_repr : repr -> t
-  val repr_name : string
-end
-
-module type%template [@mode m = (local, global)] With_sexpable = sig
-  type t [@@deriving (equal [@mode.explicit m]), sexp]
-end
-
-module type%template [@mode m = (local, global)] With_stringable = sig
-  type t [@@deriving equal [@mode.explicit m]]
-
-  include Stringable.S with type t := t
-end
-
-module type%template [@mode m = (local, global)] With_quickcheck_and_compare = sig
-  type t [@@deriving compare [@mode.explicit m]]
-
-  include Base_quickcheck.Test.S with type t := t
-end
-
-module type%template [@mode m = (local, global)] With_quickcheck_and_equal = sig
-  type t [@@deriving equal [@mode.explicit m]]
-
-  include Base_quickcheck.Test.S with type t := t
-end
-
-module type%template
-  [@mode m = (local, global)] With_quickcheck_and_compare_and_equal = sig
-  type t [@@deriving (compare [@mode.explicit m]), (equal [@mode.explicit m])]
-
-  include Base_quickcheck.Test.S with type t := t
-end
-
-module Quickcheck = Base_quickcheck
 
 module type Expect_test_helpers_base = sig @@ portable
   (** Helpers for producing output inside [let%expect_test]. Designed for code using
       [Base]. See also [Expect_test_helpers_core] and [Expect_test_helpers_async]. *)
 
-  module type With_compare = With_compare
-  module type With_equal = With_equal
-  module type With_round_trip = With_round_trip
-  module type With_sexpable = With_sexpable
-  module type With_stringable = With_stringable
-  module type With_quickcheck_and_compare = With_quickcheck_and_compare
-  module type With_quickcheck_and_equal = With_quickcheck_and_equal
-
-  module type With_quickcheck_and_compare_and_equal =
-    With_quickcheck_and_compare_and_equal
+  include module type of struct
+    include Definitions
+  end
 
   module CR : sig
     include module type of struct
@@ -429,6 +422,19 @@ module type Expect_test_helpers_base = sig @@ portable
     -> (unit -> _) @ local once
     -> unit
 
+  (** [show_raise_and_return] is like [show_raise]; additionally, it returns the computed
+      value. If [f] returns [x], this returns [Ok x]. If [f] raises, this returns
+      [Error `already_shown]. Since the exception was already printed, it is redundant to
+      hang on to it and raise or print it again. *)
+  val show_raise_and_return
+    :  ?hide_positions:bool (** default is [false] *)
+    -> ?hide_paths:bool (** default is [false] *)
+    -> ?sanitize:(Sexp.t -> Sexp.t) (** default is Fn.id *)
+    -> ?sexp_style:Sexp_style.t (** default is [Dynamic.get sexp_style] *)
+    -> ?show_backtrace:bool (** default is [false] *)
+    -> (unit -> 'a) @ local once
+    -> ('a, [ `already_shown ]) Result.t
+
   (** [require_does_not_raise] is like [show_raise], but does not print anything if the
       function does not raise, and prints a CR along with the exception if it does raise.
       Unlike for [show_raise], the supplied function is required to return [unit] to avoid
@@ -444,6 +450,22 @@ module type Expect_test_helpers_base = sig @@ portable
     -> here:[%call_pos]
     -> (unit -> unit) @ local once
     -> unit
+
+  (** [require_does_not_raise_and_return] is like [require_does_not_raise]; additionally,
+      it returns the computed value. If [f] returns [x], this returns [Ok x]. If [f]
+      raises, this returns [Error `already_shown]. Since the exception was already
+      printed, it is redundant to hang on to it and raise or print it again. *)
+  val require_does_not_raise_and_return
+    : ('a : value_or_null).
+    ?cr:CR.t (** default is [CR] *)
+    -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
+    -> ?hide_paths:bool (** default is [false] *)
+    -> ?sanitize:(Sexp.t -> Sexp.t) (** default is Fn.id *)
+    -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
+    -> ?show_backtrace:bool (** default is [false] *)
+    -> here:[%call_pos]
+    -> (unit -> 'a) @ local once
+    -> ('a, [ `already_shown ]) Result.t
 
   (** [require_does_raise] is like [show_raise], but additionally prints a CR if the
       function does not raise. *)
@@ -609,16 +631,17 @@ module type Expect_test_helpers_base = sig @@ portable
   (** Print the [With_round_trip] representations of the given values. If there are
       multiple representations, includes the [repr_name] of each in the output. Tests that
       [to_repr] and [of_repr] round-trip for each representation. *)
-  val print_and_check_round_trip
+  val%template print_and_check_round_trip
     : ('a : value_or_null).
     ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true otherwise] *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
     -> here:[%call_pos]
-    -> (module With_equal with type t = 'a)
+    -> ((module With_equal with type t = 'a)[@mode m])
     -> (module With_round_trip with type t = 'a) list
     -> 'a list
     -> unit
+  [@@mode m = (local, global)]
 
   (** [quickcheck] is similar to [Base_quickcheck.Test.run], but
 
@@ -633,15 +656,15 @@ module type Expect_test_helpers_base = sig @@ portable
     -> ?cr:CR.t (** default is [CR] *)
     -> ?hide_positions:bool (** default is [false] when [cr=CR], [true] otherwise *)
     -> ?sexp_style:Sexp_style.t (** default is to use [Dynamic.get sexp_style] *)
-    -> ?seed:Quickcheck.Test.Config.Seed.t
+    -> ?seed:Base_quickcheck.Test.Config.Seed.t
     -> ?sizes:int Sequence.t
     -> ?trials:int
-    -> ?shrinker:'a Quickcheck.Shrinker.t
+    -> ?shrinker:'a Base_quickcheck.Shrinker.t
     -> ?shrink_attempts:int
     -> ?examples:'a list
     -> sexp_of:('a -> Sexp.t)
     -> f:('a -> unit)
-    -> 'a Quickcheck.Generator.t
+    -> 'a Base_quickcheck.Generator.t
     -> unit
     @@ nonportable
 
